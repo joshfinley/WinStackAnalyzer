@@ -1,6 +1,6 @@
-# ThreadInspector
+# WinStackAnalyzer
 
-ThreadInspector is a C++ tool designed to inspect and analyze the threads of a specific process on a Windows system. It retrieves thread contexts, prints register information, and identifies the module associated with the instruction pointer (RIP) for each thread. This tool can be useful for debugging and analyzing the runtime behavior of a process.
+WinStackAnalyzer is a C++ tool designed to inspect and analyze the threads of a specific process on a Windows system. It retrieves thread contexts, prints register information, and identifies the module associated with the instruction pointer (RIP) for each thread. This tool can be useful for debugging and analyzing the runtime behavior of a process.
 
 ## Features
 
