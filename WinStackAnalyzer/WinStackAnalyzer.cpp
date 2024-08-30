@@ -7,6 +7,11 @@
 #include "ThreadUtils.hpp"
 #include "WinWrap.hpp"
 
+#include <iostream>
+#include <iomanip>
+#include "ThreadUtils.hpp"
+#include "WinWrap.hpp"
+
 int main() {
     // Prompt the user to enter the process ID
     uint32_t processId;
@@ -14,11 +19,12 @@ int main() {
     std::cin >> processId;
 
     // Open the process to get a handle
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
-    if (hProcess == NULL) {
-        std::cerr << "Failed to open process. Error: " << WinWrap::GetLastErrorAsString().value_or("Unknown error") << std::endl;
+    auto hProcessResult = WinWrap::_OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
+    if (!hProcessResult) {
+        std::cerr << "Failed to open process. Error: " << hProcessResult.error() << std::endl;
         return 1;
     }
+    auto& hProcess = hProcessResult.value();
 
     // Get all threads of the specified process
     auto allThreadsResult = ThreadUtils::ThreadFinder::GetAllThreads(processId);
@@ -32,24 +38,28 @@ int main() {
             threadContext.PrintRegisterInfo();
 
             // Get the module associated with RIP
-            CONTEXT context;
-            context.ContextFlags = CONTEXT_FULL;
-            HANDLE hThread = OpenThread(THREAD_GET_CONTEXT, FALSE, threadContext.GetThreadId());
-            if (hThread && GetThreadContext(hThread, &context)) {
-                void* rspAddress = reinterpret_cast<void*>(context.Rip);
-                auto moduleNameResult = ThreadUtils::ModuleInfo::GetModuleNameFromAddressRemote(hProcess, rspAddress);
-                if (moduleNameResult) {
-                    std::wcout << L"Module associated with RIP: " << moduleNameResult.value() << L"\n";
+            auto hThreadResult = WinWrap::_OpenThread(THREAD_GET_CONTEXT, FALSE, threadContext.GetThreadId());
+            if (hThreadResult) {
+                auto& hThread = hThreadResult.value();
+                auto contextResult = WinWrap::_GetThreadContext(hThread.Get());
+                if (contextResult) {
+                    const auto& context = contextResult.value();
+                    void* ripAddress = reinterpret_cast<void*>(context.Rip);
+                    auto moduleNameResult = ThreadUtils::ModuleInfo::GetModuleNameFromAddressRemote(hProcess.Get(), ripAddress);
+                    if (moduleNameResult) {
+                        std::wcout << L"Module associated with RIP: " << moduleNameResult.value() << L"\n";
+                    }
+                    else {
+                        std::cerr << "Failed to get module name. Error: " << moduleNameResult.error() << "\n";
+                    }
                 }
                 else {
-                    std::cerr << "Failed to get module name. Error: " << moduleNameResult.error() << "\n";
+                    std::cerr << "Failed to get thread context. Error: " << contextResult.error() << "\n";
                 }
-                CloseHandle(hThread);
             }
             else {
-                std::cerr << "Failed to get thread context. Error: " << WinWrap::GetLastErrorAsString().value_or("Unknown error") << "\n";
+                std::cerr << "Failed to open thread. Error: " << hThreadResult.error() << "\n";
             }
-
             std::cout << "------------------------\n";
         }
     }
@@ -58,6 +68,5 @@ int main() {
         std::cerr << "Error retrieving threads: " << allThreadsResult.error() << std::endl;
     }
 
-    CloseHandle(hProcess);
     return 0;
 }

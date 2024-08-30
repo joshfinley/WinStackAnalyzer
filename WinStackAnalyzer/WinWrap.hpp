@@ -444,4 +444,51 @@ namespace WinWrap
         return hModule;
     }
 
+    //
+    // Process and Thread APIs
+    //
+
+    inline std::expected<SafeHandle<HANDLE>, std::string> _OpenThread(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwThreadId) noexcept {
+        HANDLE hThread = ::OpenThread(dwDesiredAccess, bInheritHandle, dwThreadId);
+        if (hThread == nullptr) {
+            auto errorResult = GetLastErrorAsString();
+            if (errorResult) {
+                return std::unexpected(*errorResult);
+            }
+            else {
+                return std::unexpected("Failed to get error message. Error code: " + std::to_string(errorResult.error()));
+            }
+        }
+        return SafeHandle<HANDLE>(hThread);
+    }
+
+    inline std::expected<CONTEXT, std::string> _GetThreadContext(HANDLE hThread) noexcept {
+        CONTEXT context;
+        context.ContextFlags = CONTEXT_FULL;
+        if (!::GetThreadContext(hThread, &context)) {
+            auto errorResult = GetLastErrorAsString();
+            if (errorResult) {
+                return std::unexpected(*errorResult);
+            }
+            else {
+                return std::unexpected("Failed to get error message. Error code: " + std::to_string(errorResult.error()));
+            }
+        }
+        return context;
+    }
+
+    inline std::expected<SafeHandle<HANDLE>, std::string> _OpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId) noexcept {
+        HANDLE hProcess = ::OpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId);
+        if (hProcess == nullptr) {
+            auto errorResult = GetLastErrorAsString();
+            if (errorResult) {
+                return std::unexpected(*errorResult);
+            }
+            else {
+                return std::unexpected("Failed to get error message. Error code: " + std::to_string(errorResult.error()));
+            }
+        }
+        return SafeHandle<HANDLE>(hProcess);
+    }
+
 } // namespace Wrappers
