@@ -1,6 +1,6 @@
 # WinStackAnalyzer
 
-WinStackAnalyzer is a C++ tool designed to inspect and analyze the threads of a specific process on a Windows system. It retrieves thread contexts, prints register information, and identifies the module associated with the instruction pointer (RIP) for each thread. This tool can be useful for debugging and analyzing the runtime behavior of a process.
+WinStackAnalyzer is a C++ tool designed to inspect and analyze the stacks of threads in a specific process on a Windows system. This tool can be useful for debugging and analyzing the runtime behavior of a process.
 
 ## Features
 
@@ -39,4 +39,4 @@ Contributions are welcome! Please submit pull requests or open issues on the [Gi
 
 ## Contact
 
-For any inquiries, please submit an issue
+For any inquiries, please submit an issue.
