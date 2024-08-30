@@ -131,14 +131,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="ThreadUtils.cpp" />
-    <ClCompile Include="Unwind.cpp" />
+    <ClCompile Include="ThreadAnalysis.cpp" />
     <ClCompile Include="WinStackAnalyzer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="PeUtils.hpp" />
-    <ClInclude Include="ThreadUtils.hpp" />
-    <ClInclude Include="Unwind.hpp" />
+    <ClInclude Include="ThreadAnalysis.hpp" />
     <ClInclude Include="WinWrap.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

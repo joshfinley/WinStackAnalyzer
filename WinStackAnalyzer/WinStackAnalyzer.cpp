@@ -1,57 +1,89 @@
 // WinStackAnalyzer.cpp
 
-#include "ThreadUtils.hpp"
-#include "Unwind.hpp"
-#include "WinWrap.hpp"
+#include "ThreadAnalysis.hpp"
+#include "PeUtils.hpp"
 #include <iostream>
+#include <iomanip>
 
-int main() {
-    uint32_t processId;
-    std::cout << "Enter the process ID to inspect: ";
-    std::cin >> processId;
+std::expected<void, std::string> PrintModuleInfo(const ModuleInfo& moduleInfo) {
+    std::wcout << L"Module Name: " << moduleInfo.name << std::endl;
+    std::cout << "Module Base: 0x" << std::hex << moduleInfo.baseAddress << std::endl;
+    std::cout << "Module Size: 0x" << std::hex << moduleInfo.size << std::endl;
 
-    auto hProcessResult = WinWrap::_OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
-    if (!hProcessResult) {
-        std::cerr << "Failed to open process. Error: " << hProcessResult.error() << std::endl;
-        return 1;
+    auto peFileResult = PeUtils::PeFile::Create(moduleInfo.name);
+    if (!peFileResult) {
+        std::cout << "Failed to open PE file: " << peFileResult.error() << std::endl;
+        return {};
     }
-    auto& hProcess = hProcessResult.value();
 
-    auto allThreadsResult = ThreadUtils::ThreadFinder::GetAllThreads(processId);
-    if (allThreadsResult) {
-        const auto& threadContexts = allThreadsResult.value();
-        for (const auto& threadContext : threadContexts) {
-            // Print thread context
-            ThreadUtils::PrintThreadContext(threadContext, hProcess.Get());
+    auto peFile = std::move(peFileResult.value());
 
-            // Get the RIP address and analyze unwind exceptions
-            auto hThreadResult = WinWrap::_OpenThread(THREAD_GET_CONTEXT, FALSE, threadContext.GetThreadId());
-            if (hThreadResult) {
-                auto& hThread = hThreadResult.value();
-                auto contextResult = WinWrap::_GetThreadContext(hThread.Get());
-                if (contextResult) {
-                    const auto& context = contextResult.value();
-                    void* ripAddress = reinterpret_cast<void*>(context.Rip);
-
-                    // Analyze unwind exceptions using Unwind::AnalyzeUnwindExceptions
-                    auto unwindResult = Unwind::AnalyzeUnwindExceptions(hProcess.Get(), ripAddress);
-                    if (!unwindResult) {
-                        std::cerr << "Failed to analyze unwind exceptions: " << unwindResult.error() << std::endl;
-                    }
-                }
-                else {
-                    std::cerr << "Failed to get thread context. Error: " << contextResult.error() << "\n";
-                }
-            }
-            else {
-                std::cerr << "Failed to open thread. Error: " << hThreadResult.error() << "\n";
-            }
-
-            std::cout << "------------------------\n";
-        }
+    auto is64BitResult = peFile.Is64Bit();
+    if (is64BitResult) {
+        std::cout << "64-bit PE: " << (is64BitResult.value() ? "Yes" : "No") << std::endl;
     }
     else {
-        std::cerr << "Error retrieving threads: " << allThreadsResult.error() << std::endl;
+        std::cout << "Failed to determine if PE is 64-bit: " << is64BitResult.error() << std::endl;
+    }
+
+    auto runtimeFunctionsResult = peFile.GetRuntimeFunctions();
+    if (runtimeFunctionsResult) {
+        std::cout << "Unwind data present: Yes" << std::endl;
+        std::cout << "Number of RUNTIME_FUNCTIONs: " << runtimeFunctionsResult.value().size() << std::endl;
+    }
+    else {
+        std::cout << "Unwind data present: No" << std::endl;
+        std::cout << "Error: " << runtimeFunctionsResult.error() << std::endl;
+    }
+
+    return {};
+}
+
+int main() {
+    DWORD processId;
+    std::cout << "Enter process ID: ";
+    std::cin >> processId;
+
+    auto openProcessResult = WinWrap::_OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
+    if (!openProcessResult) {
+        std::cerr << "Failed to open process: " << openProcessResult.error() << std::endl;
+        return 1;
+    }
+
+    auto hProcess = std::move(openProcessResult.value());
+
+    auto threadsResult = ThreadAnalyzer::GetAllThreadsRemote(hProcess);
+    if (!threadsResult) {
+        std::cerr << "Failed to get threads: " << threadsResult.error() << std::endl;
+        return 1;
+    }
+
+    for (const auto& thread : threadsResult.value()) {
+        std::cout << "Thread ID: " << std::dec << thread.threadId << std::endl;
+
+        auto contextResult = ThreadAnalyzer::GetThreadContextRemote(thread.threadHandle);
+        if (!contextResult) {
+            std::cerr << "Failed to get thread context: " << contextResult.error() << std::endl;
+            continue;
+        }
+
+        const auto& context = contextResult.value().GetContext();
+
+        std::cout << "RIP: 0x" << std::hex << context->Rip << std::endl;
+        std::cout << "RSP: 0x" << std::hex << context->Rsp << std::endl;
+
+        auto moduleInfoResult = ThreadAnalyzer::GetModuleInfoFromAddressRemote(hProcess, context->Rip);
+        if (!moduleInfoResult) {
+            std::cerr << "Failed to get module info: " << moduleInfoResult.error() << std::endl;
+        }
+        else {
+            auto printResult = PrintModuleInfo(moduleInfoResult.value());
+            if (!printResult) {
+                std::cerr << "Failed to print module info: " << printResult.error() << std::endl;
+            }
+        }
+
+        std::cout << std::string(50, '-') << std::endl;
     }
 
     return 0;

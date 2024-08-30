@@ -495,4 +495,97 @@ namespace WinWrap
         return SafeHandle<HANDLE>(hProcess);
     }
 
+
+    inline std::expected<DWORD, std::string> _GetProcessId(HANDLE hProcess) noexcept {
+        DWORD processId = ::GetProcessId(hProcess);
+        if (processId == 0) {
+            auto errorResult = GetLastErrorAsString();
+            if (errorResult) {
+                return std::unexpected(*errorResult);
+            }
+            else {
+                return std::unexpected("Failed to get error message. Error code: " + std::to_string(errorResult.error()));
+            }
+        }
+        return processId;
+    }
+
+    inline std::expected<BOOL, std::string> _Thread32First(HANDLE hSnapshot, LPTHREADENTRY32 lpte) noexcept {
+        if (!::Thread32First(hSnapshot, lpte)) {
+            auto errorResult = GetLastErrorAsString();
+            if (errorResult) {
+                return std::unexpected(*errorResult);
+            }
+            else {
+                return std::unexpected("Failed to get error message. Error code: " + std::to_string(errorResult.error()));
+            }
+        }
+        return TRUE;
+    }
+
+    inline std::expected<BOOL, std::string> _Thread32Next(HANDLE hSnapshot, LPTHREADENTRY32 lpte) noexcept {
+        if (!::Thread32Next(hSnapshot, lpte)) {
+            auto errorResult = GetLastErrorAsString();
+            if (errorResult) {
+                return std::unexpected(*errorResult);
+            }
+            else {
+                return std::unexpected("Failed to get error message. Error code: " + std::to_string(errorResult.error()));
+            }
+        }
+        return TRUE;
+    }
+
+    class ThreadContextWrapper {
+    public:
+        // Default constructor initializes a new CONTEXT structure
+        ThreadContextWrapper(DWORD contextFlags = CONTEXT_FULL)
+            : m_context(std::make_unique<CONTEXT>()) {
+            m_context->ContextFlags = contextFlags;
+        }
+
+        // Constructor that captures the thread context from a SafeHandle
+        ThreadContextWrapper(SafeHandle<HANDLE>&& hThread, DWORD contextFlags = CONTEXT_FULL)
+            : m_context(std::make_unique<CONTEXT>()) {
+            m_context->ContextFlags = contextFlags;
+            auto result = _GetThreadContextWrapped(std::move(hThread));
+            if (!result) {
+                throw std::runtime_error("Failed to get thread context: " + result.error());
+            }
+        }
+
+        // Copy constructor (deep copy)
+        ThreadContextWrapper(const ThreadContextWrapper& other)
+            : m_context(std::make_unique<CONTEXT>(*other.m_context)) {}
+
+        // Move constructor
+        ThreadContextWrapper(ThreadContextWrapper&& other) noexcept = default;
+
+        // Copy assignment operator (deep copy)
+        ThreadContextWrapper& operator=(const ThreadContextWrapper& other) {
+            if (this != &other) {
+                m_context = std::make_unique<CONTEXT>(*other.m_context);
+            }
+            return *this;
+        }
+
+        // Move assignment operator
+        ThreadContextWrapper& operator=(ThreadContextWrapper&& other) noexcept = default;
+
+        // Accessor for the internal CONTEXT structure
+        CONTEXT* GetContext() { return m_context.get(); }
+        const CONTEXT* GetContext() const { return m_context.get(); }
+
+    private:
+        std::unique_ptr<CONTEXT> m_context;  // Managed memory for CONTEXT
+
+        // Private method to retrieve thread context from a SafeHandle
+        std::expected<void, std::string> _GetThreadContextWrapped(SafeHandle<HANDLE>&& hThread) {
+            if (!GetThreadContext(hThread.Get(), m_context.get())) {
+                return std::unexpected("Failed to get thread context. Error: " + std::to_string(GetLastError()));
+            }
+            return {};
+        }
+    };
+
 } // namespace Wrappers
