@@ -74,7 +74,9 @@ int main() {
 
         auto moduleInfoResult = ThreadAnalyzer::GetModuleInfoFromAddressRemote(hProcess, context->Rip);
         if (!moduleInfoResult) {
-            std::cerr << "Failed to get module info: " << moduleInfoResult.error() << std::endl;
+            std::cout << "WARNING: Unbacked thread detected (suspicious)" << std::endl;
+            std::cout << "Error retrieving module info: " << moduleInfoResult.error() << std::endl;
+            std::cout << "This could indicate execution of code from an unexpected location." << std::endl;
         }
         else {
             auto printResult = PrintModuleInfo(moduleInfoResult.value());

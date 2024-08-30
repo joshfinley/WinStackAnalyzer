@@ -12,6 +12,7 @@
 #include <expected>
 #include <string>
 #include <vector>
+#include <iostream>
 
 #include <Windows.h>
 #include <TlHelp32.h>
@@ -121,6 +122,7 @@ namespace WinWrap
     // Safe Handle
     //
 
+    // Concept to ensure the template parameter is of type HANDLE
     template <typename T>
     concept HandleType = std::same_as<T, HANDLE>;
 
@@ -135,39 +137,51 @@ namespace WinWrap
         // SafeHandle default constructor
         inline SafeHandle() noexcept = default;
 
-        // SafeHandle explicity constructor from H handle
-        inline explicit SafeHandle(H handle) noexcept : m_handle(handle) {}
+        // SafeHandle explicit constructor from H handle
+        // Validates the handle upon construction
+        inline explicit SafeHandle(H handle) noexcept : m_handle(handle)
+        {
+            ValidateHandle();
+        }
 
-        // SafeHandle deconstructor
+        // SafeHandle destructor
+        // Ensures the handle is properly closed
         inline ~SafeHandle() noexcept
         {
             Close();
         }
 
+        // Disable copy operations to prevent unintended handle duplication
         SafeHandle(const SafeHandle&) = delete;
         SafeHandle& operator=(const SafeHandle&) = delete;
 
         // SafeHandle move constructor
+        // Transfers ownership of the handle and its validity state
         inline SafeHandle(SafeHandle&& other) noexcept
-            : m_handle(std::exchange(other.m_handle, s_nullValue))
+            : m_handle(std::exchange(other.m_handle, s_nullValue)),
+            m_isValid(std::exchange(other.m_isValid, false))
         {
         }
 
         // SafeHandle move assignment operator
+        // Closes current handle and transfers ownership from other
         inline SafeHandle& operator=(SafeHandle&& other) noexcept
         {
             if (this != &other)
             {
                 Close();
                 m_handle = std::exchange(other.m_handle, s_nullValue);
+                m_isValid = std::exchange(other.m_isValid, false);
             }
             return *this;
         }
 
         // Check if the handle is valid
+        // Revalidates the handle before returning the status
         [[nodiscard]] inline bool IsValid() const noexcept
         {
-            return !IsInvalid(m_handle);
+            ValidateHandle();
+            return m_isValid;
         }
 
         // Get the raw handle
@@ -177,28 +191,33 @@ namespace WinWrap
         }
 
         // Reassign the SafeHandle's handle
+        // Closes the current handle and validates the new one
         inline void Reset(H newHandle = s_nullValue) noexcept
         {
             if (m_handle != newHandle)
             {
                 Close();
                 m_handle = newHandle;
+                ValidateHandle();
             }
         }
 
-        // Get the handle and release the SafeHandle's handle
+        // Get the handle and release the SafeHandle's ownership
+        // The caller becomes responsible for closing the handle
         inline H Release() noexcept
         {
+            m_isValid = false;
             return std::exchange(m_handle, s_nullValue);
         }
 
         // SafeHandle bool() operator
+        // Returns true if the handle is valid
         inline explicit operator bool() const noexcept
         {
             return IsValid();
         }
 
-        // SafeHandle conversion operator
+        // SafeHandle conversion operator to H
         inline explicit operator H() const noexcept
         {
             return m_handle;
@@ -208,22 +227,52 @@ namespace WinWrap
         static constexpr H s_nullValue = nullptr;
         static constexpr H s_invalidValue = INVALID_HANDLE_VALUE;
 
-        H m_handle{ s_nullValue };
+        mutable H m_handle{ s_nullValue };
+        mutable bool m_isValid{ false };
 
         // Check if the HANDLE value is invalid
-        inline  static bool IsInvalid(H handle) noexcept
+        inline static bool IsInvalidValue(H handle) noexcept
         {
             return handle == s_nullValue || handle == s_invalidValue;
         }
 
-        // Close the handle if not invalid
-        inline void Close() noexcept
+        // Validate the handle using GetHandleInformation
+        // Updates m_isValid based on the result
+        // If handle is invalid, sets m_handle to s_nullValue
+        inline void ValidateHandle() const noexcept
         {
-            if (!IsInvalid(m_handle))
+            if (!IsInvalidValue(m_handle))
             {
-                ::CloseHandle(m_handle);
+                DWORD flags;
+                m_isValid = ::GetHandleInformation(m_handle, &flags) != 0;
+                if (!m_isValid)
+                {
+                    m_handle = s_nullValue; // Ensure we don't try to close an invalid handle later
+                }
+            }
+            else
+            {
+                m_isValid = false;
                 m_handle = s_nullValue;
             }
+        }
+
+        // Close the handle if it's valid
+        // Revalidates the handle before attempting to close
+        // Resets m_handle to s_nullValue and m_isValid to false
+        inline void Close() noexcept
+        {
+            ValidateHandle(); // Revalidate before closing
+            if (m_isValid && !IsInvalidValue(m_handle))
+            {
+                BOOL result = ::CloseHandle(m_handle);
+                if (!result) {
+                    // Log error or handle it as appropriate for your application
+                    std::cerr << "Warning: Failed to close handle " << m_handle << ". Error code: " << GetLastError() << std::endl;
+                }
+            }
+            m_handle = s_nullValue;
+            m_isValid = false;
         }
     };
 
@@ -265,6 +314,45 @@ namespace WinWrap
         catch (...) {
             // In case std::string constructor throws (e.g., out of memory)
             return std::unexpected(ERROR_OUTOFMEMORY);
+        }
+    }
+
+    //
+    // HANDLE operations
+    //
+
+    inline std::expected<bool, std::string> _GetHandleInformation(const SafeHandle<HANDLE>& hObject) {
+        DWORD flags;
+        if (GetHandleInformation(hObject.Get(), &flags)) {
+            return true;  // Handle is valid
+        }
+        else {
+            DWORD error = GetLastError();
+            if (error == ERROR_INVALID_HANDLE) {
+                return std::unexpected("Invalid handle");
+            }
+            else {
+                return std::unexpected("Failed to get handle information. Error: " + std::to_string(error));
+            }
+        }
+    }
+
+    inline std::expected<void, std::string> _CloseHandle(SafeHandle<HANDLE>& hObject) {
+        auto handleCheck = _GetHandleInformation(hObject);
+        if (!handleCheck) {
+            return std::unexpected(handleCheck.error());
+        }
+
+        if (handleCheck.value()) {
+            if (CloseHandle(hObject.Release())) {
+                return {}; // Success, handle closed
+            }
+            else {
+                return std::unexpected("Failed to close handle. Error: " + std::to_string(GetLastError()));
+            }
+        }
+        else {
+            return std::unexpected("Cannot close an invalid handle.");
         }
     }
 
