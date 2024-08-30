@@ -9,6 +9,8 @@
 #include <tlhelp32.h>
 #include <algorithm>
 
+#include "Unwind.hpp"
+
 namespace ThreadUtils {
 
     // Constructor for ThreadContext
@@ -160,4 +162,29 @@ namespace ThreadUtils {
         return ThreadContext(threadContext, threadId, createTimeInt64);
     }
 
+
+    // Print thread context and inspect module
+    void PrintThreadContext(const ThreadContext& threadContext, HANDLE hProcess) {
+        std::cout << "Thread ID: " << threadContext.GetThreadId() << "\n";
+        std::cout << "Register Info:\n";
+        threadContext.PrintRegisterInfo();
+
+        // Get the module associated with RIP
+        auto hThreadResult = WinWrap::_OpenThread(THREAD_GET_CONTEXT, FALSE, threadContext.GetThreadId());
+        if (hThreadResult) {
+            auto& hThread = hThreadResult.value();
+            auto contextResult = WinWrap::_GetThreadContext(hThread.Get());
+            if (contextResult) {
+                const auto& context = contextResult.value();
+                void* ripAddress = reinterpret_cast<void*>(context.Rip);
+                Unwind::AnalyzeUnwindExceptions(hProcess, ripAddress);
+            }
+            else {
+                std::cerr << "Failed to get thread context. Error: " << contextResult.error() << "\n";
+            }
+        }
+        else {
+            std::cerr << "Failed to open thread. Error: " << hThreadResult.error() << "\n";
+        }
+    }
 } // namespace ThreadUtils

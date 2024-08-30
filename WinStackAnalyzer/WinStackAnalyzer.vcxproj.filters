@@ -21,12 +21,21 @@
     <ClCompile Include="ThreadUtils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Unwind.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ThreadUtils.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="WinWrap.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PeUtils.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Unwind.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

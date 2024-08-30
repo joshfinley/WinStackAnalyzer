@@ -34,6 +34,9 @@ namespace ThreadUtils {
         uint64_t m_creationTime;    // The creation time of the thread.
     };
 
+    // Print thread context and inspect module
+    void PrintThreadContext(const ThreadContext& threadContext, HANDLE hProcess);
+
     // ThreadFinder class provides methods to find specific threads within a process, such as the main thread, or to retrieve all threads.
     class ThreadFinder {
     public:

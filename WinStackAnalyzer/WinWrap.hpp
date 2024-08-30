@@ -1,3 +1,7 @@
+// WinWrap.hpp
+// Header-only library to wrap a subset of the Windows API for the purpose of 
+// increasing memory safety and modernizing Windows C++ codebases
+
 #pragma once
 
 #include <concepts>
