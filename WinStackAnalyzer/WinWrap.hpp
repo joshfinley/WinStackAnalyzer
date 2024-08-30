@@ -676,4 +676,85 @@ namespace WinWrap
         }
     };
 
+    //
+    // Named Pipe Wrapper
+    //
+
+    class NamedPipe {
+    public:
+        static std::expected<NamedPipe, std::string> Create(
+            const std::wstring& pipeName,
+            DWORD openMode,
+            DWORD pipeMode,
+            DWORD maxInstances,
+            DWORD outBufferSize,
+            DWORD inBufferSize,
+            DWORD defaultTimeOut,
+            LPSECURITY_ATTRIBUTES securityAttributes = nullptr
+        ) {
+            HANDLE hPipe = CreateNamedPipeW(
+                pipeName.c_str(),
+                openMode,
+                pipeMode,
+                maxInstances,
+                outBufferSize,
+                inBufferSize,
+                defaultTimeOut,
+                securityAttributes
+            );
+
+            if (hPipe == INVALID_HANDLE_VALUE) {
+                return std::unexpected("Failed to create named pipe: " + std::to_string(GetLastError()));
+            }
+
+            return NamedPipe(SafeHandle(hPipe));
+        }
+
+        static std::expected<NamedPipe, std::string> Connect(const std::wstring& pipeName) {
+            HANDLE hPipe = CreateFileW(
+                pipeName.c_str(),
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                nullptr,
+                OPEN_EXISTING,
+                0,
+                nullptr
+            );
+
+            if (hPipe == INVALID_HANDLE_VALUE) {
+                return std::unexpected("Failed to connect to named pipe: " + std::to_string(GetLastError()));
+            }
+
+            return NamedPipe(SafeHandle(hPipe));
+        }
+
+        std::expected<void, std::string> ConnectToNewClient() {
+            if (!ConnectNamedPipe(m_hPipe.Get(), nullptr)) {
+                return std::unexpected("Failed to connect to new client: " + std::to_string(GetLastError()));
+            }
+            return {};
+        }
+
+        std::expected<size_t, std::string> Read(void* buffer, size_t bufferSize) {
+            DWORD bytesRead;
+            if (!ReadFile(m_hPipe.Get(), buffer, static_cast<DWORD>(bufferSize), &bytesRead, nullptr)) {
+                return std::unexpected("Failed to read from pipe: " + std::to_string(GetLastError()));
+            }
+            return bytesRead;
+        }
+
+        std::expected<size_t, std::string> Write(const void* buffer, size_t bufferSize) {
+            DWORD bytesWritten;
+            if (!WriteFile(m_hPipe.Get(), buffer, static_cast<DWORD>(bufferSize), &bytesWritten, nullptr)) {
+                return std::unexpected("Failed to write to pipe: " + std::to_string(GetLastError()));
+            }
+            return bytesWritten;
+        }
+
+    private:
+        explicit NamedPipe(SafeHandle<HANDLE>&& hPipe) : m_hPipe(std::move(hPipe)) {}
+
+        SafeHandle<HANDLE> m_hPipe;
+    };
+
 } // namespace Wrappers

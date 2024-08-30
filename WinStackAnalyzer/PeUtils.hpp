@@ -10,6 +10,7 @@
 #include <memory>
 #include <expected>
 #include <fstream>
+#include <functional>
 #include <system_error>
 
 #include "WinWrap.hpp"  // Include WinWrap for necessary utilities
@@ -178,6 +179,66 @@ namespace PeUtils
             }
             catch (...) {
                 return std::unexpected("Failed to get RUNTIME_FUNCTIONs");
+            }
+        }
+
+        // Method to get all exported functions
+        std::expected<std::vector<std::pair<std::string, DWORD>>, std::string> GetExportedFunctions() const noexcept
+        {
+            try {
+                std::vector<std::pair<std::string, DWORD>> exports;
+                auto exportDir = m_ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+                if (exportDir.Size == 0) {
+                    return exports; // No exports
+                }
+
+                auto offsetResult = RvaToFileOffset(exportDir.VirtualAddress);
+                if (!offsetResult) {
+                    return std::unexpected(offsetResult.error());
+                }
+
+                auto exportTable = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(
+                    m_fileData.data() + offsetResult.value());
+
+                const std::vector<uint8_t>& constFileData = m_fileData;
+                auto functionsOffset = RvaToFileOffset(exportTable->AddressOfFunctions).value();
+                auto namesOffset = RvaToFileOffset(exportTable->AddressOfNames).value();
+                auto ordinalsOffset = RvaToFileOffset(exportTable->AddressOfNameOrdinals).value();
+
+                DWORD* functions = reinterpret_cast<DWORD*>(const_cast<uint8_t*>(constFileData.data()) + functionsOffset);
+                DWORD* names = reinterpret_cast<DWORD*>(const_cast<uint8_t*>(constFileData.data()) + namesOffset);
+                WORD* ordinals = reinterpret_cast<WORD*>(const_cast<uint8_t*>(constFileData.data()) + ordinalsOffset);
+
+                for (DWORD i = 0; i < exportTable->NumberOfNames; i++) {
+                    std::string functionName(reinterpret_cast<const char*>(m_fileData.data() + RvaToFileOffset(names[i]).value()));
+                    DWORD functionRva = functions[ordinals[i]];
+                    exports.emplace_back(functionName, functionRva);
+                }
+
+                return exports;
+            }
+            catch (...) {
+                return std::unexpected("Failed to get exported functions");
+            }
+        }
+
+        // Method to iterate over the Export Address Table (EAT)
+        std::expected<void, std::string> IterateExportAddressTable(const std::function<void(const std::string&, DWORD)>& callback) const noexcept
+        {
+            try {
+                auto exportsResult = GetExportedFunctions();
+                if (!exportsResult) {
+                    return std::unexpected(exportsResult.error());
+                }
+
+                for (const auto& [functionName, functionRva] : exportsResult.value()) {
+                    callback(functionName, functionRva);
+                }
+
+                return {};
+            }
+            catch (...) {
+                return std::unexpected("Failed to iterate over Export Address Table");
             }
         }
 
