@@ -136,6 +136,7 @@
     <ClCompile Include="WinStackAnalyzer.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Injector.hpp" />
     <ClInclude Include="PeUtils.hpp" />
     <ClInclude Include="ThreadAnalysis.hpp" />
     <ClInclude Include="WinWrap.hpp" />

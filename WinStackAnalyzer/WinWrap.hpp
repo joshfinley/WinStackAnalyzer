@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <algorithm>
 
 #include <Windows.h>
 #include <TlHelp32.h>
@@ -501,13 +502,19 @@ namespace WinWrap
             return std::unexpected(modulesResult.error());
         }
 
+        std::wstring lowerModuleName = moduleName;
+        std::transform(lowerModuleName.begin(), lowerModuleName.end(), lowerModuleName.begin(), ::towlower);
+
         for (const auto& hModule : modulesResult.value()) {
             auto fileNameResult = _GetModuleFileNameEx(hProcess, hModule);
             if (!fileNameResult) {
                 continue; // Skip this module if we can't get its file name
             }
 
-            if (fileNameResult.value().find(moduleName) != std::wstring::npos) {
+            std::wstring lowerFileName = fileNameResult.value();
+            std::transform(lowerFileName.begin(), lowerFileName.end(), lowerFileName.begin(), ::towlower);
+
+            if (lowerFileName.find(lowerModuleName) != std::wstring::npos) {
                 auto modInfoResult = _GetModuleInformation(hProcess, hModule);
                 if (!modInfoResult) {
                     return std::unexpected(modInfoResult.error());
@@ -550,6 +557,15 @@ namespace WinWrap
             else {
                 return std::unexpected("Failed to get error message. Error code: " + std::to_string(errorResult.error()));
             }
+        }
+        return SafeHandle<HANDLE>(hThread);
+    }
+
+    // Wrapper for CreateRemoteThread
+    inline std::expected<SafeHandle<HANDLE>, std::string> _CreateRemoteThread(HANDLE hProcess, LPVOID lpStartAddress, LPVOID lpParameter) noexcept {
+        HANDLE hThread = ::CreateRemoteThread(hProcess, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(lpStartAddress), lpParameter, 0, nullptr);
+        if (!hThread) {
+            return std::unexpected("Failed to create remote thread. Error: " + std::to_string(::GetLastError()));
         }
         return SafeHandle<HANDLE>(hThread);
     }
@@ -756,5 +772,68 @@ namespace WinWrap
 
         SafeHandle<HANDLE> m_hPipe;
     };
+
+    //
+    // Memory Allocation
+    //
+
+     // Wrapper for VirtualAllocEx in remote process
+    inline std::expected<LPVOID, std::string> _VirtualAllocEx(HANDLE hProcess, SIZE_T size, DWORD flAllocationType = MEM_COMMIT, DWORD flProtect = PAGE_READWRITE) noexcept {
+        LPVOID allocatedMemory = ::VirtualAllocEx(hProcess, nullptr, size, flAllocationType, flProtect);
+        if (!allocatedMemory) {
+            return std::unexpected("Failed to allocate memory in target process. Error: " + std::to_string(::GetLastError()));
+        }
+        return allocatedMemory;
+    }
+
+    // Wrapper for VirtualFreeEx in remote process
+    inline std::expected<void, std::string> _VirtualFreeEx(HANDLE hProcess, LPVOID lpAddress, SIZE_T size = 0, DWORD dwFreeType = MEM_RELEASE) noexcept {
+        if (!::VirtualFreeEx(hProcess, lpAddress, size, dwFreeType)) {
+            return std::unexpected("Failed to free memory in target process. Error: " + std::to_string(::GetLastError()));
+        }
+        return {};
+    }
+
+    //
+    // Memory Writing
+    //
+
+    // Wrapper for WriteProcessMemory
+    inline std::expected<void, std::string> _WriteProcessMemory(HANDLE hProcess, LPVOID lpBaseAddress, LPCVOID lpBuffer, SIZE_T nSize) noexcept {
+        SIZE_T bytesWritten;
+        if (!::WriteProcessMemory(hProcess, lpBaseAddress, lpBuffer, nSize, &bytesWritten) || bytesWritten != nSize) {
+            return std::unexpected("Failed to write memory in target process. Error: " + std::to_string(::GetLastError()));
+        }
+        return {};
+    }
+
+    // 
+    // Windows and NT API Extensions
+    //
+    namespace Extensions
+    {
+        // Wrapper to get the address of a function (e.g., LoadLibraryW) in a remote process
+        inline std::expected<LPVOID, std::string> GetRemoteProcAddress(HANDLE hProcess, const std::wstring& moduleName, const std::string& procName) noexcept {
+            auto moduleBaseResult = GetModuleBaseAddress(hProcess, moduleName);
+            if (!moduleBaseResult) {
+                return std::unexpected("Failed to find module base address: " + moduleBaseResult.error());
+            }
+
+            HMODULE localModuleHandle = ::GetModuleHandleW(moduleName.c_str());
+            if (!localModuleHandle) {
+                return std::unexpected("Failed to get local module handle. Error: " + std::to_string(::GetLastError()));
+            }
+
+            FARPROC localProcAddress = ::GetProcAddress(localModuleHandle, procName.c_str());
+            if (!localProcAddress) {
+                return std::unexpected("Failed to get local procedure address. Error: " + std::to_string(::GetLastError()));
+            }
+
+            uintptr_t offset = reinterpret_cast<uintptr_t>(localProcAddress) - reinterpret_cast<uintptr_t>(localModuleHandle);
+            LPVOID remoteProcAddress = reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(moduleBaseResult.value()) + offset);
+
+            return remoteProcAddress;
+        }
+    }
 
 } // namespace Wrappers

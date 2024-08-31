@@ -242,6 +242,21 @@ namespace PeUtils
             }
         }
 
+        // Check if the file is a valid DLL
+        std::expected<bool, std::string> IsValidDll() const noexcept
+        {
+            try {
+                // Check if the file is a PE file
+                if (m_ntHeaders->FileHeader.Characteristics & IMAGE_FILE_DLL) {
+                    return true;
+                }
+                return false;
+            }
+            catch (...) {
+                return std::unexpected("Failed to validate DLL");
+            }
+        }
+
     private:
         std::vector<uint8_t> m_fileData;
         const IMAGE_DOS_HEADER* m_dosHeader;
@@ -308,4 +323,6 @@ namespace PeUtils
         auto peFileResult = PeFile::Create(filePath);
         return peFileResult.has_value();
     }
+
+
 }

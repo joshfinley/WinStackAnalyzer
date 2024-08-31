@@ -1,9 +1,11 @@
 // WinStackAnalyzer.cpp
 
-#include "ThreadAnalysis.hpp"
-#include "PeUtils.hpp"
 #include <iostream>
 #include <iomanip>
+
+#include "ThreadAnalysis.hpp"
+#include "PeUtils.hpp"
+#include "Injector.hpp"
 
 std::expected<void, std::string> PrintModuleInfo(const ModuleInfo& moduleInfo) {
     std::wcout << L"Module Name: " << moduleInfo.name << std::endl;
@@ -39,6 +41,42 @@ std::expected<void, std::string> PrintModuleInfo(const ModuleInfo& moduleInfo) {
     return {};
 }
 
+
+std::expected<std::wstring, std::string> GetAbsolutePath(const std::wstring& relativePath) {
+    wchar_t fullPath[MAX_PATH];
+    DWORD result = GetFullPathNameW(relativePath.c_str(), MAX_PATH, fullPath, nullptr);
+    if (result == 0 || result > MAX_PATH) {
+        return std::unexpected("Failed to get the absolute path. Error: " + std::to_string(GetLastError()));
+    }
+    return std::wstring(fullPath);
+}
+
+
+std::expected<void, std::string> InjectHookDll(DWORD processId)
+{
+    std::wstring relativeDllPath;
+
+#ifdef _DEBUG
+    relativeDllPath = L"..\\x64\\Debug\\HookDll.dll";  // Adjust the path for debug mode
+#else
+    relativeDllPath = L".\\HookDll.dll";  // Use current directory for release mode
+#endif
+
+    // Convert to an absolute path
+    auto absoluteDllPathResult = GetAbsolutePath(relativeDllPath);
+    if (!absoluteDllPathResult) {
+        return std::unexpected("Failed to resolve DLL path: " + absoluteDllPathResult.error());
+    }
+    std::wstring absoluteDllPath = absoluteDllPathResult.value();
+
+    auto injectResult = Injector::InjectDll(processId, absoluteDllPath);
+    if (!injectResult) {
+        return std::unexpected("Failed to inject DLL: " + injectResult.error());
+    }
+
+    return {};
+}
+
 int main() {
     DWORD processId;
     std::cout << "Enter process ID: ";
@@ -57,6 +95,8 @@ int main() {
         std::cerr << "Failed to get threads: " << threadsResult.error() << std::endl;
         return 1;
     }
+
+    bool suspiciousActivityDetected = false;
 
     for (const auto& thread : threadsResult.value()) {
         std::cout << "Thread ID: " << std::dec << thread.threadId << std::endl;
@@ -77,6 +117,8 @@ int main() {
             std::cout << "WARNING: Unbacked thread detected (suspicious)" << std::endl;
             std::cout << "Error retrieving module info: " << moduleInfoResult.error() << std::endl;
             std::cout << "This could indicate execution of code from an unexpected location." << std::endl;
+
+            suspiciousActivityDetected = true;
         }
         else {
             auto printResult = PrintModuleInfo(moduleInfoResult.value());
@@ -86,6 +128,19 @@ int main() {
         }
 
         std::cout << std::string(50, '-') << std::endl;
+    }
+
+    // Inject DLL if suspicious activity was detected
+    if (suspiciousActivityDetected) {
+        auto result = InjectHookDll(processId);
+        if (!result) {
+            std::cerr << result.error() << std::endl;
+            return 1;
+        }
+        std::cout << "DLL injected successfully." << std::endl;
+    }
+    else {
+        std::cout << "No suspicious activity detected. No DLL injection performed." << std::endl;
     }
 
     return 0;
