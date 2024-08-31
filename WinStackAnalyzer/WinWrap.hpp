@@ -640,6 +640,14 @@ namespace WinWrap
         return TRUE;
     }
 
+    inline std::expected<std::wstring, std::string> _GetModuleFileName(HMODULE hModule) {
+        wchar_t fullPath[MAX_PATH];
+        if (GetModuleFileNameW(hModule, fullPath, MAX_PATH) == 0) {
+            return std::unexpected("Failed to get full path for module. Error: " + std::to_string(GetLastError()));
+        }
+        return std::wstring(fullPath);
+    }
+
     class ThreadContextWrapper {
     public:
         // Default constructor initializes a new CONTEXT structure

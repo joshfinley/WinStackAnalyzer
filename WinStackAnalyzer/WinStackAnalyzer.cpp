@@ -52,7 +52,7 @@ std::expected<std::wstring, std::string> GetAbsolutePath(const std::wstring& rel
 }
 
 
-std::expected<void, std::string> InjectHookDll(DWORD processId)
+std::expected<boolean, std::string> InjectHookDll(DWORD processId)
 {
     std::wstring relativeDllPath;
 
@@ -74,13 +74,17 @@ std::expected<void, std::string> InjectHookDll(DWORD processId)
         return std::unexpected("Failed to inject DLL: " + injectResult.error());
     }
 
-    return {};
+    return true;
 }
 
 int main() {
     DWORD processId;
+#ifndef _DEBUG
     std::cout << "Enter process ID: ";
     std::cin >> processId;
+#else
+    processId = 1368;  // Adjust to the correct PID for debugging
+#endif
 
     auto openProcessResult = WinWrap::_OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
     if (!openProcessResult) {
@@ -137,11 +141,31 @@ int main() {
             std::cerr << result.error() << std::endl;
             return 1;
         }
-        std::cout << "DLL injected successfully." << std::endl;
+        std::cout << "DLL injected successfully into the target process." << std::endl;
     }
     else {
-        std::cout << "No suspicious activity detected. No DLL injection performed." << std::endl;
+        std::cout << "No suspicious activity detected. No DLL injection performed into the target process." << std::endl;
     }
+
+#ifdef _DEBUG
+    // Inject DLL into the current process under debug mode
+    std::cout << "Debug build enabled. Injecting HookDLl into self" << std::endl;
+
+    auto currentProcessId = GetCurrentProcessId();
+    if (currentProcessId != processId) {
+        auto result = InjectHookDll(currentProcessId);
+        if (!result) {
+            std::cerr << "Failed to inject DLL into the current process: " << result.error() << std::endl;
+            return 1;
+        }
+        std::cout << "DLL injected successfully into the current process under debug mode." << std::endl;
+    }
+
+    // Test the hook
+    currentProcessId = 0;
+    FARPROC _GetCurrentProcessId = GetProcAddress(GetModuleHandle(L"kernel32.dll"), "GetCurrentProcessId");
+    currentProcessId = _GetCurrentProcessId();
+#endif
 
     return 0;
 }
