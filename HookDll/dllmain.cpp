@@ -11,10 +11,6 @@ std::mutex g_DetourMapMutex;
 // Template data for trampoline hooks
 unsigned char g_TrampolineTemplate[] = {
     0x48, 0xB8,                    // mov rax, immediate 64-bit value
-    0x00, 0x00, 0x00, 0x00,        // Placeholder for realFunctionAddress (low DWORD)
-    0x00, 0x00, 0x00, 0x00,        // Placeholder for realFunctionAddress (high DWORD)
-    0x50,                          // push rax (push realFunctionAddress onto stack)
-    0x48, 0xB8,                    // mov rax, immediate 64-bit value
     0x00, 0x00, 0x00, 0x00,        // Placeholder for hookWrapperAddress (low DWORD)
     0x00, 0x00, 0x00, 0x00,        // Placeholder for hookWrapperAddress (high DWORD)
     0xFF, 0xE0                     // jmp rax (jump to hookWrapperAddress)
@@ -28,21 +24,36 @@ void LogError(const std::string& message) {
 
 extern "C" void GenericHookWrapper();
 
-// The C++ detour function called by the assembly wrapper
-extern "C" void MonitorHook(void* realFunctionAddress, ...)
-{
-    // Use va_list to capture the variable arguments
-    va_list args;
-    va_start(args, realFunctionAddress);
+void* LookupRealFunctionAddress(void* trampolineAddress) {
+    std::lock_guard<std::mutex> lock(g_DetourMapMutex);  // Lock the mutex to ensure thread safety
 
-    // You can inspect or log the arguments here
+    auto it = g_DetourMap.find(trampolineAddress);
+    if (it != g_DetourMap.end()) {
+        return it->second;  // Return the real function address if found
+    }
+    else {
+        std::cerr << "Error: Trampoline address not found in the detour map!" << std::endl;
+        return nullptr;  // Return nullptr if the trampoline address is not found
+    }
+}
+
+// The C++ detour function called by the assembly wrapper
+extern "C" void MonitorHook(...)
+{
+    // Get the trampoline address
+    void* trampolineAddress = _ReturnAddress();
+
+    // Lookup the actual address
+    auto realFunctionAddress = LookupRealFunctionAddress(trampolineAddress);
 
     // Call the real function
     typedef void (*RealFunctionType)(...);
     RealFunctionType realFunction = (RealFunctionType)realFunctionAddress;
-    realFunction(args);  // Forward the arguments to the real function
 
-    va_end(args);
+    va_list args;
+    va_start(args, trampolineAddress);  // Start processing variadic arguments
+    realFunction(args);                 // Call the real function with the arguments
+    va_end(args);                       // End variadic argument processing
 }
 
 // Generate a trampoline hook that pushes the unique ID
@@ -52,11 +63,8 @@ void* GenerateTrampoline(void* trampolineAddress, void* realFunctionAddress, voi
     memcpy(trampolineAddress, g_TrampolineTemplate, sizeof(g_TrampolineTemplate));
 
     // Fill in the placeholders with the actual addresses
-    uintptr_t realFuncAddr = reinterpret_cast<uintptr_t>(realFunctionAddress);
-    memcpy(&((unsigned char*)trampolineAddress)[2], &realFuncAddr, sizeof(uintptr_t));
-
     uintptr_t hookWrapperAddr = reinterpret_cast<uintptr_t>(hookWrapperAddress);
-    memcpy(&((unsigned char*)trampolineAddress)[13], &hookWrapperAddr, sizeof(uintptr_t));
+    memcpy(&((unsigned char*)trampolineAddress)[2], &hookWrapperAddr, sizeof(uintptr_t));
 
     return trampolineAddress;
 }
@@ -142,7 +150,7 @@ std::expected<WinWrap::VirtualAllocPtr, std::string> SetupHooks()
         // Store the mapping of the detour address to the original function
         {
             std::lock_guard<std::mutex> lock(g_DetourMapMutex);
-            g_DetourMap[originalFunc] = functionAddress; // Map the detour function to the original function
+            g_DetourMap[originalFunc] = functionAddress; // Map the original function to the trampoline
         }
     }
 

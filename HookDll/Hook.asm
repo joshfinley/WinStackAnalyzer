@@ -12,9 +12,7 @@ PUBLIC GenericHookWrapper
 .code           ; Start of the code segment
 
 GenericHookWrapper PROC
-    
-    call MonitorHook       ; Call the MonitorHook
-
+    call MonitorHook       ; Call the MonitorHook, which inspects the current thread context
     ret
 GenericHookWrapper ENDP
 
