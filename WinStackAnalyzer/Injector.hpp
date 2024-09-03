@@ -33,7 +33,7 @@ namespace Injector
         if (!openProcessResult) {
             return std::unexpected("Failed to open process: " + openProcessResult.error());
         }
-        WinWrap::SafeHandle<HANDLE> hProcess = std::move(openProcessResult.value());
+        WinWrap::WrappedHandle<HANDLE> hProcess = std::move(openProcessResult.value());
 
         // Allocate memory in the target process for the DLL path
         auto dllPathSize = (dllPath.length() + 1) * sizeof(wchar_t);
@@ -64,7 +64,7 @@ namespace Injector
             WinWrap::_VirtualFreeEx(hProcess.Get(), pRemoteDllPath);
             return std::unexpected("Failed to create remote thread in target process: " + createThreadResult.error());
         }
-        WinWrap::SafeHandle<HANDLE> hThread = std::move(createThreadResult.value());
+        WinWrap::WrappedHandle<HANDLE> hThread = std::move(createThreadResult.value());
 
         // Wait for the remote thread to finish
         ::WaitForSingleObject(hThread.Get(), INFINITE);

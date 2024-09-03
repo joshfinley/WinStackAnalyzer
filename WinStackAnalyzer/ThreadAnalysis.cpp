@@ -2,7 +2,7 @@
 // Implementation for thread analysis functions
 #include "ThreadAnalysis.hpp"
 
-std::expected<ModuleInfo, std::string> ThreadAnalyzer::GetModuleInfoFromAddressRemote(const WinWrap::SafeHandle<HANDLE>& hProcess, uintptr_t address) {
+std::expected<ModuleInfo, std::string> ThreadAnalyzer::GetModuleInfoFromAddressRemote(const WinWrap::WrappedHandle<HANDLE>& hProcess, uintptr_t address) {
     auto modulesResult = WinWrap::_EnumProcessModulesEx(hProcess.Get());
     if (!modulesResult) {
         return std::unexpected(modulesResult.error());
@@ -32,23 +32,23 @@ std::expected<ModuleInfo, std::string> ThreadAnalyzer::GetModuleInfoFromAddressR
 }
 
 std::expected<ModuleInfo, std::string> ThreadAnalyzer::GetModuleInfoFromAddressLocal(uintptr_t address) {
-    return GetModuleInfoFromAddressRemote(WinWrap::SafeHandle<HANDLE>(GetCurrentProcess()), address);
+    return GetModuleInfoFromAddressRemote(WinWrap::WrappedHandle<HANDLE>(GetCurrentProcess()), address);
 }
 
-std::expected<WinWrap::ThreadContextWrapper, std::string> ThreadAnalyzer::GetThreadContextRemote(const WinWrap::SafeHandle<HANDLE>& hThread) {
+std::expected<WinWrap::ThreadContextWrapper, std::string> ThreadAnalyzer::GetThreadContextRemote(const WinWrap::WrappedHandle<HANDLE>& hThread) {
     try {
-        return WinWrap::ThreadContextWrapper(WinWrap::SafeHandle<HANDLE>(hThread.Get()));
+        return WinWrap::ThreadContextWrapper(WinWrap::WrappedHandle<HANDLE>(hThread.Get()));
     }
     catch (const std::runtime_error& e) {
         return std::unexpected(e.what());
     }
 }
 
-std::expected<WinWrap::ThreadContextWrapper, std::string> ThreadAnalyzer::GetThreadContextLocal(const WinWrap::SafeHandle<HANDLE>& hThread) {
+std::expected<WinWrap::ThreadContextWrapper, std::string> ThreadAnalyzer::GetThreadContextLocal(const WinWrap::WrappedHandle<HANDLE>& hThread) {
     return GetThreadContextRemote(hThread);
 }
 
-std::expected<std::vector<ThreadInfo>, std::string> ThreadAnalyzer::GetAllThreadsRemote(const WinWrap::SafeHandle<HANDLE>& hProcess) {
+std::expected<std::vector<ThreadInfo>, std::string> ThreadAnalyzer::GetAllThreadsRemote(const WinWrap::WrappedHandle<HANDLE>& hProcess) {
     std::vector<ThreadInfo> threads;
 
     auto processIdResult = GetProcessIdFromHandle(hProcess);
@@ -85,15 +85,15 @@ std::expected<std::vector<ThreadInfo>, std::string> ThreadAnalyzer::GetAllThread
 }
 
 std::expected<std::vector<ThreadInfo>, std::string> ThreadAnalyzer::GetAllThreadsLocal() {
-    return GetAllThreadsRemote(WinWrap::SafeHandle<HANDLE>(GetCurrentProcess()));
+    return GetAllThreadsRemote(WinWrap::WrappedHandle<HANDLE>(GetCurrentProcess()));
 }
 
-std::expected<bool, std::string> ThreadAnalyzer::UnwindThreadStack(ThreadInfo& threadInfo, const WinWrap::SafeHandle<HANDLE>& hProcess) {
+std::expected<bool, std::string> ThreadAnalyzer::UnwindThreadStack(ThreadInfo& threadInfo, const WinWrap::WrappedHandle<HANDLE>& hProcess) {
     // Implement stack unwinding logic here
     // This is a placeholder and needs to be implemented based on your specific requirements
     return std::unexpected("Stack unwinding not implemented yet");
 }
 
-std::expected<DWORD, std::string> ThreadAnalyzer::GetProcessIdFromHandle(const WinWrap::SafeHandle<HANDLE>& hProcess) {
+std::expected<DWORD, std::string> ThreadAnalyzer::GetProcessIdFromHandle(const WinWrap::WrappedHandle<HANDLE>& hProcess) {
     return WinWrap::_GetProcessId(hProcess.Get());
 }

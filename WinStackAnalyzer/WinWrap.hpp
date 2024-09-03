@@ -132,33 +132,33 @@ namespace WinWrap
     // The template parameter H ensures that the data type of the handle
     // is the same as HANDLE
     template <HandleType H>
-    class SafeHandle final
+    class WrappedHandle final
     {
     public:
         // SafeHandle default constructor
-        inline SafeHandle() noexcept = default;
+        inline WrappedHandle() noexcept = default;
 
         // SafeHandle explicit constructor from H handle
         // Validates the handle upon construction
-        inline explicit SafeHandle(H handle) noexcept : m_handle(handle)
+        inline explicit WrappedHandle(H handle) noexcept : m_handle(handle)
         {
             ValidateHandle();
         }
 
         // SafeHandle destructor
         // Ensures the handle is properly closed
-        inline ~SafeHandle() noexcept
+        inline ~WrappedHandle() noexcept
         {
             Close();
         }
 
         // Disable copy operations to prevent unintended handle duplication
-        SafeHandle(const SafeHandle&) = delete;
-        SafeHandle& operator=(const SafeHandle&) = delete;
+        WrappedHandle(const WrappedHandle&) = delete;
+        WrappedHandle& operator=(const WrappedHandle&) = delete;
 
         // SafeHandle move constructor
         // Transfers ownership of the handle and its validity state
-        inline SafeHandle(SafeHandle&& other) noexcept
+        inline WrappedHandle(WrappedHandle&& other) noexcept
             : m_handle(std::exchange(other.m_handle, s_nullValue)),
             m_isValid(std::exchange(other.m_isValid, false))
         {
@@ -166,7 +166,7 @@ namespace WinWrap
 
         // SafeHandle move assignment operator
         // Closes current handle and transfers ownership from other
-        inline SafeHandle& operator=(SafeHandle&& other) noexcept
+        inline WrappedHandle& operator=(WrappedHandle&& other) noexcept
         {
             if (this != &other)
             {
@@ -278,6 +278,35 @@ namespace WinWrap
     };
 
     //
+    // Memory Management
+    // 
+    
+    // Custom deleter for VirtualAlloc
+    struct VirtualAllocDeleter {
+        void operator()(void* ptr) const {
+            if (ptr) {
+                VirtualFree(ptr, 0, MEM_RELEASE);
+            }
+        }
+    };
+
+    // Alias for unique_ptr with VirtualAllocDeleter
+    using VirtualAllocPtr = std::unique_ptr<void, VirtualAllocDeleter>;
+
+    // Helper function to create a VirtualAllocPtr, returning std::expected
+    inline std::expected<VirtualAllocPtr, std::string> _VirtualAlloc(
+        SIZE_T size,
+        DWORD allocationType = MEM_COMMIT | MEM_RESERVE,
+        DWORD protect = PAGE_READWRITE)
+    {
+        void* ptr = VirtualAlloc(nullptr, size, allocationType, protect);
+        if (!ptr) {
+            return std::unexpected("VirtualAlloc failed with error code: " + std::to_string(GetLastError()));
+        }
+        return VirtualAllocPtr(ptr);
+    }
+
+    //
     // Error Management
     //
 
@@ -322,7 +351,7 @@ namespace WinWrap
     // HANDLE operations
     //
 
-    inline std::expected<bool, std::string> _GetHandleInformation(const SafeHandle<HANDLE>& hObject) {
+    inline std::expected<bool, std::string> _GetHandleInformation(const WrappedHandle<HANDLE>& hObject) {
         DWORD flags;
         if (GetHandleInformation(hObject.Get(), &flags)) {
             return true;  // Handle is valid
@@ -338,7 +367,7 @@ namespace WinWrap
         }
     }
 
-    inline std::expected<void, std::string> _CloseHandle(SafeHandle<HANDLE>& hObject) {
+    inline std::expected<void, std::string> _CloseHandle(WrappedHandle<HANDLE>& hObject) {
         auto handleCheck = _GetHandleInformation(hObject);
         if (!handleCheck) {
             return std::unexpected(handleCheck.error());
@@ -366,7 +395,7 @@ namespace WinWrap
     // Tool Help Function Wrappers
     //
 
-    inline std::expected<SafeHandle<HANDLE>, std::string> _CreateToolhelp32Snapshot(uint32_t flags, uint32_t th32ProcessID) noexcept
+    inline std::expected<WrappedHandle<HANDLE>, std::string> _CreateToolhelp32Snapshot(uint32_t flags, uint32_t th32ProcessID) noexcept
     {
         HANDLE hSnapshot = ::CreateToolhelp32Snapshot(flags, th32ProcessID);
         if (hSnapshot == INVALID_HANDLE_VALUE)
@@ -381,7 +410,7 @@ namespace WinWrap
                 return std::unexpected("Failed to get error message. Error code: " + std::to_string(errorResult.error()));
             }
         }
-        return SafeHandle<HANDLE>(hSnapshot);
+        return WrappedHandle<HANDLE>(hSnapshot);
     }
 
     //
@@ -547,7 +576,7 @@ namespace WinWrap
     // Process and Thread APIs
     //
 
-    inline std::expected<SafeHandle<HANDLE>, std::string> _OpenThread(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwThreadId) noexcept {
+    inline std::expected<WrappedHandle<HANDLE>, std::string> _OpenThread(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwThreadId) noexcept {
         HANDLE hThread = ::OpenThread(dwDesiredAccess, bInheritHandle, dwThreadId);
         if (hThread == nullptr) {
             auto errorResult = GetLastErrorAsString();
@@ -558,16 +587,16 @@ namespace WinWrap
                 return std::unexpected("Failed to get error message. Error code: " + std::to_string(errorResult.error()));
             }
         }
-        return SafeHandle<HANDLE>(hThread);
+        return WrappedHandle<HANDLE>(hThread);
     }
 
     // Wrapper for CreateRemoteThread
-    inline std::expected<SafeHandle<HANDLE>, std::string> _CreateRemoteThread(HANDLE hProcess, LPVOID lpStartAddress, LPVOID lpParameter) noexcept {
+    inline std::expected<WrappedHandle<HANDLE>, std::string> _CreateRemoteThread(HANDLE hProcess, LPVOID lpStartAddress, LPVOID lpParameter) noexcept {
         HANDLE hThread = ::CreateRemoteThread(hProcess, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(lpStartAddress), lpParameter, 0, nullptr);
         if (!hThread) {
             return std::unexpected("Failed to create remote thread. Error: " + std::to_string(::GetLastError()));
         }
-        return SafeHandle<HANDLE>(hThread);
+        return WrappedHandle<HANDLE>(hThread);
     }
 
     inline std::expected<CONTEXT, std::string> _GetThreadContext(HANDLE hThread) noexcept {
@@ -585,7 +614,7 @@ namespace WinWrap
         return context;
     }
 
-    inline std::expected<SafeHandle<HANDLE>, std::string> _OpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId) noexcept {
+    inline std::expected<WrappedHandle<HANDLE>, std::string> _OpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId) noexcept {
         HANDLE hProcess = ::OpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId);
         if (hProcess == nullptr) {
             auto errorResult = GetLastErrorAsString();
@@ -596,7 +625,7 @@ namespace WinWrap
                 return std::unexpected("Failed to get error message. Error code: " + std::to_string(errorResult.error()));
             }
         }
-        return SafeHandle<HANDLE>(hProcess);
+        return WrappedHandle<HANDLE>(hProcess);
     }
 
 
@@ -657,7 +686,7 @@ namespace WinWrap
         }
 
         // Constructor that captures the thread context from a SafeHandle
-        ThreadContextWrapper(SafeHandle<HANDLE>&& hThread, DWORD contextFlags = CONTEXT_FULL)
+        ThreadContextWrapper(WrappedHandle<HANDLE>&& hThread, DWORD contextFlags = CONTEXT_FULL)
             : m_context(std::make_unique<CONTEXT>()) {
             m_context->ContextFlags = contextFlags;
             auto result = _GetThreadContextWrapped(std::move(hThread));
@@ -692,7 +721,7 @@ namespace WinWrap
         std::unique_ptr<CONTEXT> m_context;  // Managed memory for CONTEXT
 
         // Private method to retrieve thread context from a SafeHandle
-        std::expected<void, std::string> _GetThreadContextWrapped(SafeHandle<HANDLE>&& hThread) {
+        std::expected<void, std::string> _GetThreadContextWrapped(WrappedHandle<HANDLE>&& hThread) {
             if (!GetThreadContext(hThread.Get(), m_context.get())) {
                 return std::unexpected("Failed to get thread context. Error: " + std::to_string(GetLastError()));
             }
@@ -731,7 +760,7 @@ namespace WinWrap
                 return std::unexpected("Failed to create named pipe: " + std::to_string(GetLastError()));
             }
 
-            return NamedPipe(SafeHandle(hPipe));
+            return NamedPipe(WrappedHandle(hPipe));
         }
 
         static std::expected<NamedPipe, std::string> Connect(const std::wstring& pipeName) {
@@ -749,7 +778,7 @@ namespace WinWrap
                 return std::unexpected("Failed to connect to named pipe: " + std::to_string(GetLastError()));
             }
 
-            return NamedPipe(SafeHandle(hPipe));
+            return NamedPipe(WrappedHandle(hPipe));
         }
 
         std::expected<void, std::string> ConnectToNewClient() {
@@ -776,9 +805,9 @@ namespace WinWrap
         }
 
     private:
-        explicit NamedPipe(SafeHandle<HANDLE>&& hPipe) : m_hPipe(std::move(hPipe)) {}
+        explicit NamedPipe(WrappedHandle<HANDLE>&& hPipe) : m_hPipe(std::move(hPipe)) {}
 
-        SafeHandle<HANDLE> m_hPipe;
+        WrappedHandle<HANDLE> m_hPipe;
     };
 
     //

@@ -182,64 +182,27 @@ namespace PeUtils
             }
         }
 
-        // Method to get all exported functions
+        // Method to get all exported functions as a vector
         std::expected<std::vector<std::pair<std::string, DWORD>>, std::string> GetExportedFunctions() const noexcept
         {
-            try {
-                std::vector<std::pair<std::string, DWORD>> exports;
-                auto exportDir = m_ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-                if (exportDir.Size == 0) {
-                    return exports; // No exports
-                }
+            std::vector<std::pair<std::string, DWORD>> exports;
+            auto result = ParseExportTable([&exports](const std::string& name, DWORD rva) {
+                exports.emplace_back(name, rva);
+                return std::expected<void, std::string>{};
+                });
 
-                auto offsetResult = RvaToFileOffset(exportDir.VirtualAddress);
-                if (!offsetResult) {
-                    return std::unexpected(offsetResult.error());
-                }
-
-                auto exportTable = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(
-                    m_fileData.data() + offsetResult.value());
-
-                const std::vector<uint8_t>& constFileData = m_fileData;
-                auto functionsOffset = RvaToFileOffset(exportTable->AddressOfFunctions).value();
-                auto namesOffset = RvaToFileOffset(exportTable->AddressOfNames).value();
-                auto ordinalsOffset = RvaToFileOffset(exportTable->AddressOfNameOrdinals).value();
-
-                DWORD* functions = reinterpret_cast<DWORD*>(const_cast<uint8_t*>(constFileData.data()) + functionsOffset);
-                DWORD* names = reinterpret_cast<DWORD*>(const_cast<uint8_t*>(constFileData.data()) + namesOffset);
-                WORD* ordinals = reinterpret_cast<WORD*>(const_cast<uint8_t*>(constFileData.data()) + ordinalsOffset);
-
-                for (DWORD i = 0; i < exportTable->NumberOfNames; i++) {
-                    std::string functionName(reinterpret_cast<const char*>(m_fileData.data() + RvaToFileOffset(names[i]).value()));
-                    DWORD functionRva = functions[ordinals[i]];
-                    exports.emplace_back(functionName, functionRva);
-                }
-
-                return exports;
+            if (!result) {
+                return std::unexpected(result.error());
             }
-            catch (...) {
-                return std::unexpected("Failed to get exported functions");
-            }
+
+            return exports;
         }
 
-        // Method to iterate over the Export Address Table (EAT)
-        std::expected<void, std::string> IterateExportAddressTable(const std::function<void(const std::string&, DWORD)>& callback) const noexcept
+        // Method to iterate over the Export Address Table (EAT) with a callback
+        std::expected<void, std::string> GetExportedFunctions(
+            const std::function<std::expected<void, std::string>(const std::string&, DWORD)>& callback) const noexcept
         {
-            try {
-                auto exportsResult = GetExportedFunctions();
-                if (!exportsResult) {
-                    return std::unexpected(exportsResult.error());
-                }
-
-                for (const auto& [functionName, functionRva] : exportsResult.value()) {
-                    callback(functionName, functionRva);
-                }
-
-                return {};
-            }
-            catch (...) {
-                return std::unexpected("Failed to iterate over Export Address Table");
-            }
+            return ParseExportTable(callback);
         }
 
         // Check if the file is a valid DLL
@@ -315,6 +278,99 @@ namespace PeUtils
 
             return std::unexpected("RVA not found in any section");
         }
+
+        // Private method to parse the export table
+        std::expected<void, std::string> ParseExportTable(
+            const std::function<std::expected<void, std::string>(const std::string&, DWORD)>& callback) const noexcept
+        {
+            try {
+                auto exportDir = m_ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+                if (exportDir.Size == 0) {
+                    return {}; // No exports, return successfully
+                }
+
+                auto offsetResult = RvaToFileOffset(exportDir.VirtualAddress);
+                if (!offsetResult) {
+                    return std::unexpected(offsetResult.error());
+                }
+
+                if (offsetResult.value() + sizeof(IMAGE_EXPORT_DIRECTORY) > m_fileData.size()) {
+                    return std::unexpected("Export directory out of bounds");
+                }
+
+                auto exportTable = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(
+                    m_fileData.data() + offsetResult.value());
+
+                auto functionsOffsetResult = RvaToFileOffset(exportTable->AddressOfFunctions);
+                auto namesOffsetResult = RvaToFileOffset(exportTable->AddressOfNames);
+                auto ordinalsOffsetResult = RvaToFileOffset(exportTable->AddressOfNameOrdinals);
+
+                if (!functionsOffsetResult || !namesOffsetResult || !ordinalsOffsetResult) {
+                    return std::unexpected("Failed to get offsets for export table");
+                }
+
+                auto functionsOffset = functionsOffsetResult.value();
+                auto namesOffset = namesOffsetResult.value();
+                auto ordinalsOffset = ordinalsOffsetResult.value();
+
+                if (functionsOffset + exportTable->NumberOfFunctions * sizeof(DWORD) > m_fileData.size() ||
+                    namesOffset + exportTable->NumberOfNames * sizeof(DWORD) > m_fileData.size() ||
+                    ordinalsOffset + exportTable->NumberOfNames * sizeof(WORD) > m_fileData.size()) {
+                    return std::unexpected("Export table data out of bounds");
+                }
+
+                const DWORD* functions = reinterpret_cast<const DWORD*>(m_fileData.data() + functionsOffset);
+                const DWORD* names = reinterpret_cast<const DWORD*>(m_fileData.data() + namesOffset);
+                const WORD* ordinals = reinterpret_cast<const WORD*>(m_fileData.data() + ordinalsOffset);
+
+                for (DWORD i = 0; i < exportTable->NumberOfNames; i++) {
+                    if (i >= exportTable->NumberOfFunctions) {
+                        return std::unexpected("Export table corrupted: more names than functions");
+                    }
+
+                    auto nameRvaResult = RvaToFileOffset(names[i]);
+                    if (!nameRvaResult) {
+                        return std::unexpected("Failed to get name RVA for export " + std::to_string(i));
+                    }
+
+                    auto nameOffset = nameRvaResult.value();
+                    if (nameOffset >= m_fileData.size()) {
+                        return std::unexpected("Name offset out of bounds for export " + std::to_string(i));
+                    }
+
+                    std::string functionName;
+                    for (size_t j = nameOffset; j < m_fileData.size(); ++j) {
+                        if (m_fileData[j] == 0) {
+                            functionName = std::string(reinterpret_cast<const char*>(&m_fileData[nameOffset]), j - nameOffset);
+                            break;
+                        }
+                    }
+
+                    if (functionName.empty()) {
+                        return std::unexpected("Failed to read function name for export " + std::to_string(i));
+                    }
+
+                    if (ordinals[i] >= exportTable->NumberOfFunctions) {
+                        return std::unexpected("Ordinal out of bounds for export " + std::to_string(i));
+                    }
+
+                    DWORD functionRva = functions[ordinals[i]];
+
+                    auto callbackResult = callback(functionName, functionRva);
+                    if (!callbackResult) {
+                        return std::unexpected("Callback failed for function " + functionName + ": " + callbackResult.error());
+                    }
+                }
+
+                return {};
+            }
+            catch (const std::exception& e) {
+                return std::unexpected("Exception in ParseExportTable: " + std::string(e.what()));
+            }
+            catch (...) {
+                return std::unexpected("Unknown exception in ParseExportTable");
+            }
+        }
     };
 
     // Check if a file is a valid PE file
@@ -323,6 +379,4 @@ namespace PeUtils
         auto peFileResult = PeFile::Create(filePath);
         return peFileResult.has_value();
     }
-
-
 }

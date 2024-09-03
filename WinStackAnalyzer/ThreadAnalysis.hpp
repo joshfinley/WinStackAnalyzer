@@ -23,11 +23,11 @@ public:
 
 class ThreadInfo {
 public:
-    ThreadInfo(DWORD threadId, WinWrap::SafeHandle<HANDLE>&& threadHandle)
+    ThreadInfo(DWORD threadId, WinWrap::WrappedHandle<HANDLE>&& threadHandle)
         : threadId(threadId), threadHandle(std::move(threadHandle)) {}
 
     DWORD threadId;
-    WinWrap::SafeHandle<HANDLE> threadHandle;
+    WinWrap::WrappedHandle<HANDLE> threadHandle;
     WinWrap::ThreadContextWrapper context;
     std::vector<uintptr_t> callStack;
     // Additional metadata can be added here
@@ -35,17 +35,17 @@ public:
 
 class ThreadAnalyzer {
 public:
-    static std::expected<ModuleInfo, std::string> GetModuleInfoFromAddressRemote(const WinWrap::SafeHandle<HANDLE>& hProcess, uintptr_t address);
+    static std::expected<ModuleInfo, std::string> GetModuleInfoFromAddressRemote(const WinWrap::WrappedHandle<HANDLE>& hProcess, uintptr_t address);
     static std::expected<ModuleInfo, std::string> GetModuleInfoFromAddressLocal(uintptr_t address);
 
-    static std::expected<WinWrap::ThreadContextWrapper, std::string> GetThreadContextRemote(const WinWrap::SafeHandle<HANDLE>& hThread);
-    static std::expected<WinWrap::ThreadContextWrapper, std::string> GetThreadContextLocal(const WinWrap::SafeHandle<HANDLE>& hThread);
+    static std::expected<WinWrap::ThreadContextWrapper, std::string> GetThreadContextRemote(const WinWrap::WrappedHandle<HANDLE>& hThread);
+    static std::expected<WinWrap::ThreadContextWrapper, std::string> GetThreadContextLocal(const WinWrap::WrappedHandle<HANDLE>& hThread);
 
-    static std::expected<std::vector<ThreadInfo>, std::string> GetAllThreadsRemote(const WinWrap::SafeHandle<HANDLE>& hProcess);
+    static std::expected<std::vector<ThreadInfo>, std::string> GetAllThreadsRemote(const WinWrap::WrappedHandle<HANDLE>& hProcess);
     static std::expected<std::vector<ThreadInfo>, std::string> GetAllThreadsLocal();
 
-    static std::expected<bool, std::string> UnwindThreadStack(ThreadInfo& threadInfo, const WinWrap::SafeHandle<HANDLE>& hProcess);
+    static std::expected<bool, std::string> UnwindThreadStack(ThreadInfo& threadInfo, const WinWrap::WrappedHandle<HANDLE>& hProcess);
 
 private:
-    static std::expected<DWORD, std::string> GetProcessIdFromHandle(const WinWrap::SafeHandle<HANDLE>& hProcess);
+    static std::expected<DWORD, std::string> GetProcessIdFromHandle(const WinWrap::WrappedHandle<HANDLE>& hProcess);
 };

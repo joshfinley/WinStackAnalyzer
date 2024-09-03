@@ -83,7 +83,7 @@ int main() {
     std::cout << "Enter process ID: ";
     std::cin >> processId;
 #else
-    processId = 1368;  // Adjust to the correct PID for debugging
+    processId = GetCurrentProcessId();  // Adjust to the correct PID for debugging
 #endif
 
     auto openProcessResult = WinWrap::_OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
@@ -152,13 +152,11 @@ int main() {
     std::cout << "Debug build enabled. Injecting HookDLl into self" << std::endl;
 
     auto currentProcessId = GetCurrentProcessId();
-    if (currentProcessId != processId) {
-        auto result = InjectHookDll(currentProcessId);
-        if (!result) {
-            std::cerr << "Failed to inject DLL into the current process: " << result.error() << std::endl;
-            return 1;
-        }
-        std::cout << "DLL injected successfully into the current process under debug mode." << std::endl;
+
+    auto result = InjectHookDll(currentProcessId);
+    if (!result) {
+        std::cerr << "Failed to inject DLL into the current process: " << result.error() << std::endl;
+        return 1;
     }
 
     // Test the hook
